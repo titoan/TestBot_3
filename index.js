@@ -2,6 +2,9 @@ let TelegramBot = require("node-telegram-bot-api");
 require('dotenv').config();
 let XLSX = require("xlsx");
 
+//My Modules
+let getCount = require('./modules/getCount');
+
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
@@ -11,6 +14,7 @@ let worksheet = workbook.Sheets.Page1;
 let numberToolsCell = workbook.Sheets.Page1.B2.v;
 let allTools = workbook.Sheets.Page1.B1.v
 let toolsCount = numberToolsCell;
+let countInfoMsgId;
 
 bot.onText(/\/start/, (ctx) => {
   const chatId = ctx.chat.id;
@@ -21,10 +25,16 @@ bot.onText(/\/start/, (ctx) => {
   });
 });
 
+
+
+
 bot.on("message", (ctx) => {
   const chatId = ctx.chat.id;
+  countInfoMsgId = ctx.message_id;
+  // console.log(countInfoMsgId)
   if (ctx.text === "Cчетчик сделанных инструментов") {
-    getCount(chatId);
+    bot.deleteMessage(chatId, ctx.message_id);     
+    getCount(chatId, bot, toolsCount);
     countKeyboard();
   } else if(ctx.text === "Информация о работе"){
     bot.sendMessage(chatId, `<b>Надо сделать всего</b>: ${allTools}
@@ -35,21 +45,27 @@ bot.on("message", (ctx) => {
   }
 });
 
-function countKeyboard(){
+let countKeyboardListener = '';
+function countKeyboard(){  
   bot.on("callback_query", (ctx) => {
-    const chatId = ctx.from.id;
+    countKeyboardListener = ctx.id;
     
-    if (ctx.data === "countUp") {      
-      toolsCount++;      
-      getCount(chatId);
-    } else if (ctx.data === "countDown") {
-      toolsCount--;
-      getCount(chatId);
-    } else if (ctx.data === "getWriteToolsNumber") {
-      getWriteToTable();
-    }else if(ctx.data === "dropCount"){    
-      dropCount(chatId);      
-    }
+    const chatId = ctx.message.chat.id;
+    bot.removeReplyListener(countKeyboardListener);
+      if (ctx.data === "countUp") {      
+        toolsCount++;
+        bot.deleteMessage(chatId, ctx.message.message_id);           
+        getCount(chatId, bot, toolsCount);
+      } else if (ctx.data === "countDown") {
+        toolsCount--;
+        // bot.deleteMessage(chatId, ctx.message.message_id);
+        getCount(chatId, bot, toolsCount);
+      } else if (ctx.data === "getWriteToolsNumber") {
+        bot.deleteMessage(chatId, ctx.message.message_id); 
+        getWriteToTable(chatId);
+      }else if(ctx.data === "dropCount"){       
+          dropCount(chatId);  
+      }
   });
 }
 
@@ -72,53 +88,40 @@ async function dropCount(chatId){
     }
   })  
 
-bot.on('callback_query', async ctx=>{
+
+
+bot.on('callback_query', ctx=>{
     let chatId = ctx.from.id
-    if(ctx.data === "dropCountYeas"){      
-      await XLSX.utils.sheet_add_aoa(worksheet, [[0]], { origin: "B2" });
-      toolsCount = workbook.Sheets.Page1.B2.v;
-      await getCount(chatId);
-    }else if(ctx.data === "dropCountNope"){
-      await bot.sendMessage(chatId, "Ну нет,так нет");    
+
+    try{
+      if(ctx.data === "dropCountYeas"){        
+        bot.deleteMessage(chatId, ctx.message.message_id);   
+        XLSX.utils.sheet_add_aoa(worksheet, [[0]], { origin: "B2" });
+        toolsCount = workbook.Sheets.Page1.B2.v;
+        getCount(chatId, bot, toolsCount);
+     }else if(ctx.data === "dropCountNope"){
+      try{
+        bot.deleteMessage(chatId, ctx.message.message_id); 
+        bot.sendMessage(chatId, "Ну нет,так нет"); 
+        getCount(chatId, bot, toolsCount);
+      }catch(e){
+        console.log(e)
+      }
+         
+     }
+    }catch(e){
+      console.log(e)
     }
+
   })
 }
 
 
 
-function getWriteToTable() {  
+function getWriteToTable(chatId) {  
   XLSX.utils.sheet_add_aoa(worksheet, [[toolsCount]], { origin: "B2" });  
   XLSX.writeFile(workbook, "data/myData.xlsx");
+  bot.sendMessage(chatId, 'Данные в таблицу записаны');
+  getCount(chatId, bot, toolsCount);
 }
 
-function getCount(chatId) {
-  bot.sendMessage(chatId, `Готово всего: ${toolsCount}`, {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: "+",
-            callback_data: "countUp",
-          },
-          {
-            text: "-",
-            callback_data: "countDown",
-          },
-        ],
-        [
-          {
-            text: "Записать в таблицу",
-            callback_data: "getWriteToolsNumber",
-          },
-        ],
-        [
-          {
-          text: "Обнулить",
-          callback_data: "dropCount"
-
-          }
-        ]
-      ],
-    },
-  });
-}
